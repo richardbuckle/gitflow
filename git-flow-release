@@ -287,9 +287,9 @@ cmd_finish() {
 
 	if flag push; then
 		git push "$ORIGIN" "$DEVELOP_BRANCH" || \
-			die "Could not push to $DEVELOP_BRANCH from $ORIGIN."
+			die "Could not push from $DEVELOP_BRANCH to $ORIGIN."
 		git push "$ORIGIN" "$MASTER_BRANCH" || \
-			die "Could not push to $MASTER_BRANCH from $ORIGIN."
+			die "Could not push from $MASTER_BRANCH to $ORIGIN."
 		if noflag notag; then
 			git push --tags "$ORIGIN" || \
 			  die "Could not push tags to $ORIGIN."
