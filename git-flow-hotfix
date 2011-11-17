@@ -45,7 +45,7 @@ PREFIX=$(git config --get gitflow.prefix.hotfix)
 usage() {
 	echo "usage: git flow hotfix [list] [-v]"
 	echo "       git flow hotfix start [-F] <version> [<base>]"
-	echo "       git flow hotfix finish [-Fsumpk] <version>"
+	echo "       git flow hotfix finish [-Fsumpkb] <version>"
 }
 
 cmd_default() {
@@ -196,6 +196,7 @@ cmd_finish() {
 	DEFINE_boolean push false "push to $ORIGIN after performing finish" p
 	DEFINE_boolean keep false "keep branch after performing finish" k
 	DEFINE_boolean notag false "don't tag this release" n
+	DEFINE_boolean backmerge true "back-merge $MASTER_BRANCH to be a parent of $DEVELOP_BRANCH (using tag if applicable)" b
 	parse_args "$@"
 	require_version_arg
 
@@ -247,32 +248,55 @@ cmd_finish() {
 	fi
 
 	# try to merge into develop
-	# in case a previous attempt to finish this release branch has failed,
-	# but the merge into develop was successful, we skip it now
-	if ! git_is_branch_merged_into "$BRANCH" "$DEVELOP_BRANCH"; then
-		git checkout "$DEVELOP_BRANCH" || \
-		  die "Could not check out $DEVELOP_BRANCH."
+	if flag backmerge; then
+		# in case a previous attempt to finish this release branch has failed,
+		# but the merge into develop was successful, we skip it now
+		if ! git_is_branch_merged_into "$MASTER_BRANCH" "$DEVELOP_BRANCH"; then
+			git checkout "$DEVELOP_BRANCH" || \
+			  die "Could not check out $DEVELOP_BRANCH."
 
-		# TODO: Actually, accounting for 'git describe' pays, so we should
-		# ideally git merge --no-ff $tagname here, instead!
-		git merge --no-ff "$BRANCH" || \
-		  die "There were merge conflicts."
-		  # TODO: What do we do now?
+			# merge the master branch back into develop; this makes the master
+			# branch - and the new tag (if provided) - a parent of the development
+			# branch, which in turn lets you use 'git describe' on either branch
+			if noflag notag; then
+			  git merge --no-ff "$tagname" || \
+			    die "There were merge conflicts."
+			else
+			  git merge --no-ff "$MASTER_BRANCH" || \
+			    die "There were merge conflicts."
+			fi
+		fi
+	else
+		# in case a previous attempt to finish this release branch has failed,
+		# but the merge into develop was successful, we skip it now
+		if ! git_is_branch_merged_into "$BRANCH" "$DEVELOP_BRANCH"; then
+			git checkout "$DEVELOP_BRANCH" || \
+			  die "Could not check out $DEVELOP_BRANCH."
+
+			# just merge the release branch into the development branch
+			git merge --no-ff "$BRANCH" || \
+			  die "There were merge conflicts."
+		fi
 	fi
 
 	# delete branch
 	if noflag keep; then
+		if [ "$BRANCH" = "$(git_current_branch)" ]; then
+			git checkout "$MASTER_BRANCH"
+		fi
 		git branch -d "$BRANCH"
 	fi
 
 	if flag push; then
 		git push "$ORIGIN" "$DEVELOP_BRANCH" || \
-			die "Could not push to $DEVELOP_BRANCH from $ORIGIN."
+			die "Could not push from $DEVELOP_BRANCH to $ORIGIN."
 		git push "$ORIGIN" "$MASTER_BRANCH" || \
-			die "Could not push to $MASTER_BRANCH from $ORIGIN."
+			die "Could not push from $MASTER_BRANCH to $ORIGIN."
 		if noflag notag; then
 			git push --tags "$ORIGIN" || \
 				die "Could not push tags to $ORIGIN."
+		git push "$ORIGIN" :"$BRANCH" || \
+			die "Could not delete the remote $BRANCH in $ORIGIN."
 		fi
 	fi
 
@@ -280,10 +304,19 @@ cmd_finish() {
 	echo "Summary of actions:"
 	echo "- Latest objects have been fetched from '$ORIGIN'"
 	echo "- Hotfix branch has been merged into '$MASTER_BRANCH'"
+	if noflag backmerge; then
+		echo "- Hotfix branch has been merged into '$DEVELOP_BRANCH'"
+	fi
 	if noflag notag; then
 		echo "- The hotfix was tagged '$VERSION_PREFIX$VERSION'"
+		if flag backmerge; then
+			echo "- Tag '$tagname' has been back-merged into '$DEVELOP_BRANCH'"
+		fi
+	else
+		if flag backmerge; then
+			echo "- Branch '$MASTER_BRANCH' has been back-merged into '$DEVELOP_BRANCH'"
+		fi
 	fi
-	echo "- Hotfix branch has been back-merged into '$DEVELOP_BRANCH'"
 	if flag keep; then
 		echo "- Hotfix branch '$BRANCH' is still available"
 	else
@@ -291,6 +324,7 @@ cmd_finish() {
 	fi
 	if flag push; then
 		echo "- '$DEVELOP_BRANCH', '$MASTER_BRANCH' and tags have been pushed to '$ORIGIN'"
+		echo "- Hotfix branch '$BRANCH' in '$ORIGIN' has been deleted."
 	fi
 	echo
 }
